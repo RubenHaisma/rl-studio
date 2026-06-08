@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 from rl_studio.cli import app
-from rl_studio.lib import grpo
+from rl_studio.lib import backends, grpo
 from rl_studio.lib.config import GRPOConfig
+from rl_studio.output import CliError
 
 runner = CliRunner()
 
@@ -128,3 +130,41 @@ def test_eval_missing_policy_exits_nonzero(tmp_path):
     result = runner.invoke(app, ["eval", "nope", "--out", out, "--json"])
     assert result.exit_code != 0
     assert json.loads(result.stdout)["ok"] is False
+
+
+# ---------------------------------------------------------------------------
+# backend seam: one `train` entry routes to builtin (numpy) or trl (real engine)
+# ---------------------------------------------------------------------------
+def test_backend_detection():
+    assert backends.read_backend("configs/toy-grpo.yaml") == "builtin"
+    assert backends.read_backend("configs/grpo-qwen.yaml") == "trl"
+    # the --backend flag overrides the config
+    assert backends.read_backend("configs/toy-grpo.yaml", override="trl") == "trl"
+
+
+def test_train_trl_dry_run_shows_plan_without_gpu():
+    # --dry-run must work with no GPU and no modal launcher: it just prints the
+    # dispatch plan an agent would execute.
+    result = runner.invoke(app, ["train", "configs/grpo-qwen.yaml", "--dry-run", "--json"])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["backend"] == "trl"
+    assert payload["dispatch"] == "modal"
+    assert "modal run" in payload["would_run"]
+
+
+def test_train_builtin_dry_run():
+    result = runner.invoke(app, ["train", "configs/toy-grpo.yaml", "--dry-run", "--json"])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["backend"] == "builtin"
+    assert payload["dispatch"] == "in-process"
+
+
+def test_trl_backend_requires_launcher(monkeypatch):
+    # Without the `modal` launcher a real (non-dry-run) trl dispatch must fail
+    # cleanly, never attempt to run. (Simulate modal absent.)
+    monkeypatch.setattr(backends.importlib.util, "find_spec", lambda name: None)
+    with pytest.raises(CliError):
+        backends.run_trl("configs/grpo-qwen.yaml", dry_run=False)

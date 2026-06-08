@@ -3,6 +3,7 @@
 # `target`. Deterministic, checkable reward — no neural reward model (RLVR-style).
 # Runs on CPU in well under a second and demonstrably learns.
 name: digit-sum
+backend: builtin    # in-process numpy GRPO (CPU, CI-verified). See also: trl
 task: digit_sum
 seq_len: 4          # 4 digit positions
 vocab: 10           # digits 0..9 -> reachable sums [0, 36]

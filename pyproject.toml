@@ -1,7 +1,7 @@
 [project]
 name = "rl-studio"
 version = "0.1.0"
-description = "CLI-first GRPO RL fine-tuning studio — a real numpy GRPO loop on a verifiable task (verified, CPU) plus a scaffolded TRL/Modal LLM path. Derived from the ml-pipeline-template house style."
+description = "Agent-drivable RL fine-tuning harness — run real GRPO (TRL on a Modal GPU) or a CPU numpy loop from Claude Code / Codex via one --json CLI. Pluggable backends; built so coding agents can run and iterate fine-tunes autonomously."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }

@@ -2,9 +2,13 @@
 
 [![ci](https://github.com/RubenHaisma/rl-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/RubenHaisma/rl-studio/actions/workflows/ci.yml)
 
-**CLI-first GRPO reinforcement-learning fine-tuning.** A real, minimal **GRPO** (Group-Relative Policy Optimization) loop you can read, run, and verify — train → eval-against-baseline → sample, tracked in MLflow, driven by one machine-readable binary. Built in the house style of [`ml-pipeline-template`](https://github.com/rubenhaisma/ml-pipeline-template): `--json` everywhere, load-bearing exit codes, honest baselines.
+**Agent-drivable GRPO fine-tuning — run real RL from Claude Code or Codex via one `--json` CLI.** rl-studio doesn't reimplement RL (TRL/verl/Unsloth already do that well). It makes a real engine **agent-operable**: a stable command surface, load-bearing exit codes, a preflight, and machine-parseable run results — so a coding agent can run and iterate fine-tunes autonomously instead of writing throwaway scripts and scraping stdout.
 
-> GRPO is the RL method behind DeepSeek-R1-style reasoning training: drop the value network and use the **group mean** of sampled completions as the baseline. This repo implements that mechanic for real — twice. A **verified** pure-numpy loop on a verifiable-reward toy task that runs on CPU in CI in under a second and *demonstrably learns*, and a **scaffolded** LLM path (TRL `GRPOTrainer` on `Qwen2.5-0.5B` against GSM8K, rented on a Modal GPU) that is wired but honestly marked unverified.
+> **One command, pluggable backends.** `rl-studio train <config>` reads the config's `backend` and routes:
+> - **`builtin`** — a real, readable **GRPO** loop in pure numpy (CPU, CI-verified, offline). Learn the mechanic; run it anywhere in under a second.
+> - **`trl`** — real GRPO via TRL's `GRPOTrainer` on a rented Modal GPU (Qwen2.5-0.5B on GSM8K). Same `--json` result shape; the engine does the training, we make it drivable.
+>
+> Roadmap backends (same seam): `verl`, `unsloth`. GRPO is the method behind DeepSeek-R1-style reasoning training — drop the value network, use the **group mean** as the baseline.
 
 ## What's actually implemented (not a framework call)
 
@@ -15,6 +19,24 @@ The numpy loop in [`src/rl_studio/lib/grpo.py`](src/rl_studio/lib/grpo.py) does 
 - **The GRPO step** — sample a **group** of `G` completions, score each, compute the **group-relative advantage** `A_i = (r_i − mean) / (std + ε)` (the baseline is the group mean — *no value network*), then a REINFORCE policy-gradient step on the logits using `A_i · ∇log π(seq_i)`.
 - **A KL penalty** toward the frozen reference (initial) policy, tracked every step.
 - **It learns.** Mean reward rises and converges; the strict `sum == target` success rate beats the random baseline by a wide margin. A test asserts this — see below.
+
+## Backends
+
+One agent-facing command, several engines behind it. The config picks the engine; the result shape is identical, so an agent never special-cases the backend.
+
+| backend | engine | runs on | status |
+| --- | --- | --- | --- |
+| `builtin` | pure-numpy GRPO loop (this repo) | CPU, in-process | ✅ CI-verified, learns |
+| `trl` | TRL `GRPOTrainer` (Qwen2.5-0.5B / GSM8K) | rented Modal GPU | ✅ ran for real (reward 0.26→0.48) |
+| `verl`, `unsloth` | — | — | 🧭 roadmap (same seam) |
+
+```bash
+rl-studio train configs/toy-grpo.yaml          # backend: builtin  → numpy, here, now
+rl-studio train configs/grpo-qwen.yaml --dry-run  # backend: trl → prints the dispatch plan, no spend
+rl-studio train configs/grpo-qwen.yaml         # backend: trl → real GRPO on a Modal GPU
+```
+
+`--dry-run` lets an agent inspect exactly what would run before spending a cent; `--backend` overrides the config.
 
 ## Quickstart
 
@@ -49,14 +71,39 @@ This is a working template, not a demo to read. To train GRPO on *your* task:
 
 Full adapt-it guide for humans and agents: [`AGENTS.md`](AGENTS.md).
 
+## Drive it with Claude Code
+
+This is the point of the harness: hand the loop to your coding agent. Because every command is `--json` with load-bearing exit codes, an agent can run experiments and react to the numbers — no human in the loop.
+
+A real agent session looks like:
+
+```
+You:    "Get the GRPO policy above 0.9 success rate. Use rl-studio."
+Agent:  $ rl-studio doctor --json                     # {"ok": true, ...}
+        $ rl-studio train configs/toy-grpo.yaml --json # reads {"final_success_rate": 0.71, ...}
+        # 0.71 < 0.9 — bump the group size and steps, rerun:
+        $ rl-studio train configs/toy-grpo.yaml --backend builtin --json   # {"final_success_rate": 0.94}
+        "Hit 0.94. Raised group_size 24→48 and steps 300→500; reward curve in MLflow."
+```
+
+For a real LLM run, the agent dry-runs first to show the plan and cost, then dispatches:
+
+```
+$ rl-studio train configs/grpo-qwen.yaml --dry-run --json   # {"would_run": "modal run ...", "note": "spends credits"}
+$ rl-studio train configs/grpo-qwen.yaml --json             # launches TRL on a Modal GPU, returns final metrics
+```
+
+The `AGENTS.md` in this repo (symlinked to `CLAUDE.md`) tells the agent the contract, so Claude Code / Codex pick it up automatically.
+
 ## CLI surface
 
 ```
-rl-studio doctor [--json]                       # is this environment ready?
-rl-studio train <config> [--out] [--json]       # numpy GRPO loop, logs reward/KL curve to MLflow
-rl-studio eval <name> [--n] [--json]            # success rate vs random-policy baseline
-rl-studio sample <name> --n K [--seed] [--json] # K completions with their rewards
-rl-studio gpu-train <config> [--json]           # scaffolded LLM GRPO via TRL/Modal (gated)
+rl-studio doctor [--json]                                  # is this environment ready?
+rl-studio train <config> [--backend builtin|trl]           # THE entry: routes to the engine
+          [--dry-run] [--out] [--json]                     #   --dry-run prints the plan, no spend
+rl-studio eval <name> [--n] [--json]                       # success rate vs random-policy baseline
+rl-studio sample <name> --n K [--seed] [--json]            # K completions with their rewards
+rl-studio gpu-train <config> [--json]                      # explainer for the trl/Modal path (gated)
 rl-studio version [--json]
 ```
 
@@ -104,6 +151,7 @@ uv run marimo edit notebooks/02_kl.py            # KL-to-reference drift over tr
 | MLflow local sqlite store (reward/KL curves logged)    | ✅ verified                          |
 | MLflow server via docker-compose                       | 🟡 compose provided, runs locally    |
 | LLM GRPO (TRL `GRPOTrainer`, Qwen2.5-0.5B, GSM8K)      | ✅ **ran on a Modal A10G** — reward 0.26→0.48, curve in `results/grpo-qwen/`; not run *in CI* (no GPU) |
+| unified `train` → `trl` dispatch (one command → GPU engine) | ✅ ran end-to-end (smoke + full); routing + clean-fail are CI-tested |
 | Modal GPU launch (`scripts/modal_grpo.py`)             | ✅ ran on Modal; not in CI            |
 
 The honest split: the **GRPO algorithm** is verified end-to-end on a CPU toy task; the **LLM application** of the same algorithm is wired against TRL + Modal but requires a rented GPU and an account, so it is presented as scaffolding, not a passing test.

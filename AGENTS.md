@@ -4,10 +4,12 @@ Agent instructions for **rl-studio**, in the cross-tool [AGENTS.md](https://agen
 
 ## What this repo is
 
-A CLI-first **GRPO** (Group-Relative Policy Optimization) reinforcement-learning fine-tuning studio. Two paths, same algorithm:
+An **agent-operable harness for GRPO fine-tuning**. It does not reimplement RL — it makes a real engine drivable by a coding agent through one `--json` CLI. `rl-studio train <config>` routes by the config's `backend`:
 
-1. **Verified (numpy, CPU, in CI):** `src/rl_studio/lib/grpo.py` — a real GRPO loop on a verifiable-reward toy task that demonstrably learns.
-2. **Real LLM run (GPU):** `scripts/modal_grpo.py` — TRL `GRPOTrainer` on Qwen2.5-0.5B against GSM8K, run on a rented Modal GPU (reward 0.26→0.48, curve in `results/grpo-qwen/`).
+1. **`builtin`** (numpy, CPU, CI-verified): `src/rl_studio/lib/grpo.py` — a real, readable GRPO loop on a verifiable-reward toy task that demonstrably learns.
+2. **`trl`** (real LLM, GPU): dispatches `scripts/modal_grpo.py` — TRL `GRPOTrainer` on Qwen2.5-0.5B / GSM8K on a rented Modal GPU (ran for real, reward 0.26→0.48). Returns the **same JSON shape** as builtin.
+
+Roadmap backends (same seam): `verl`, `unsloth`. The dispatch layer is `src/rl_studio/lib/backends.py`.
 
 ## Driving the CLI as an agent
 
@@ -17,12 +19,20 @@ Every command is **non-interactive**, takes **`--json`**, and uses **load-bearin
 rl-studio doctor --json
 # -> {"ok": true, "checks": {... "modal": true, "gpu_extra_installed": false}}
 
-rl-studio train configs/toy-grpo.yaml --json
-# -> {"ok": true, "name": "digit-sum", "metrics": {"final_success_rate": 0.875, "lift_over_baseline": 0.809, "final_kl": ...}}
+rl-studio train configs/toy-grpo.yaml --json            # backend: builtin (CPU, in-process)
+# -> {"ok": true, "backend": "builtin", "name": "digit-sum", "metrics": {"final_success_rate": 0.875, "lift_over_baseline": 0.809, ...}}
 
-rl-studio eval digit-sum --json      # success rate vs random baseline
+rl-studio train configs/grpo-qwen.yaml --dry-run --json # backend: trl — inspect the plan, NO spend
+# -> {"ok": true, "backend": "trl", "dispatch": "modal", "would_run": "modal run scripts/modal_grpo.py --config ...", ...}
+
+rl-studio train configs/grpo-qwen.yaml --json           # backend: trl — launches TRL on a Modal GPU
+# -> {"ok": true, "backend": "trl", "metrics": {"final_reward": ..., "steps": ...}, "results_path": "results/..."}
+
+rl-studio eval digit-sum --json      # success rate vs random baseline (builtin policies)
 rl-studio sample digit-sum --n 5 --json
 ```
+
+**Backend routing:** `train` reads `backend:` from the config (`builtin` | `trl`), or `--backend` overrides it. Always `--dry-run` a `trl` run first to surface the plan/cost before spending. The dispatch returns the same shape regardless of engine, so don't special-case it.
 
 **Contract:** with `--json`, stdout is exactly one JSON object (success *or* `{"ok": false, "error": "..."}`); exit `0` = success, non-zero = failure with one stderr line. Parse stdout, branch on the exit code. Discover the surface with `rl-studio --help`.
 

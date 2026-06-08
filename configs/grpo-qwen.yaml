@@ -3,6 +3,7 @@
 # verified one; this is the same algorithm applied to a real language model
 # against a verifiable-reward task (GSM8K answer-correctness).
 name: grpo-qwen
+backend: trl        # real GRPO via TRL's GRPOTrainer on a Modal GPU
 
 model: Qwen/Qwen2.5-0.5B-Instruct
 dataset: openai/gsm8k          # verifiable reward: parse final answer, check it

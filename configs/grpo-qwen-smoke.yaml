@@ -3,6 +3,7 @@
 # minimal steps. The Laava Studio "tiny smoke" pattern.
 #   uv run modal run scripts/modal_grpo.py --config configs/grpo-qwen-smoke.yaml
 name: grpo-qwen-smoke
+backend: trl        # real GRPO via TRL's GRPOTrainer on a Modal GPU
 
 model: Qwen/Qwen2.5-0.5B-Instruct
 dataset: openai/gsm8k
