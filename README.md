@@ -40,6 +40,15 @@ trained digit-sum (GRPO, 300 steps, group=24)
 
 Everything is also available via `make`: `make demo` runs the full train → eval → sample loop.
 
+### Spin up your own RL pipeline in minutes
+
+This is a working template, not a demo to read. To train GRPO on *your* task:
+
+- **Own verifiable reward (CPU):** edit `reward(...)` in [`src/rl_studio/lib/grpo.py`](src/rl_studio/lib/grpo.py), tweak `configs/toy-grpo.yaml`, run `rl-studio train`. The group-relative advantage, KL penalty, baseline reporting, and MLflow logging are already wired — you only write the reward.
+- **Real LLM on a GPU:** `uv sync --extra modal`, `modal token set` once, edit `correctness_reward(...)` + `configs/grpo-qwen.yaml`, then `modal run scripts/modal_grpo.py`. No training infra to manage; the reward curve lands in `results/`.
+
+Full adapt-it guide for humans and agents: [`AGENTS.md`](AGENTS.md).
+
 ## CLI surface
 
 ```
@@ -98,6 +107,16 @@ uv run marimo edit notebooks/02_kl.py            # KL-to-reference drift over tr
 | Modal GPU launch (`scripts/modal_grpo.py`)             | ✅ ran on Modal; not in CI            |
 
 The honest split: the **GRPO algorithm** is verified end-to-end on a CPU toy task; the **LLM application** of the same algorithm is wired against TRL + Modal but requires a rented GPU and an account, so it is presented as scaffolding, not a passing test.
+
+## Agent-friendly by design
+
+Every command is non-interactive, emits a single JSON object with `--json`, and returns a load-bearing exit code — so AI coding agents (**Codex, Claude Code, Cursor, Copilot, Windsurf, …**) and plain scripts can run and parse the GRPO loop with no TTY, no UI, no screen-scraping.
+
+```bash
+rl-studio train configs/toy-grpo.yaml --json   # -> {"ok": true, "metrics": {"final_success_rate": ...}}   exit 0
+```
+
+Agent instructions live in [`AGENTS.md`](AGENTS.md) — the [cross-tool standard](https://agents.md) read natively by Codex, Cursor, Copilot, and more. `CLAUDE.md` is a symlink to it, so every tool reads one source of truth.
 
 ## CI does more than lint
 
