@@ -1,0 +1,24 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+build/
+
+# tooling
+.pytest_cache/
+.ruff_cache/
+.uv/
+# uv.lock is committed for reproducible installs
+
+# rl artifacts + tracking
+artifacts/
+mlruns/
+mlartifacts/
+mlflow.db
+*.npz
+
+# env
+.env
+.DS_Store

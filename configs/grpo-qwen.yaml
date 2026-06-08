@@ -1,0 +1,30 @@
+# Scaffolded GPU path: LLM GRPO via TRL's GRPOTrainer (scripts/modal_grpo.py).
+# NOT run in CI — needs a GPU and the `gpu` extra. The numpy loop above is the
+# verified one; this is the same algorithm applied to a real language model
+# against a verifiable-reward task (GSM8K answer-correctness).
+name: grpo-qwen
+
+model: Qwen/Qwen2.5-0.5B-Instruct
+dataset: openai/gsm8k          # verifiable reward: parse final answer, check it
+dataset_config: main
+split: train
+
+# GRPO hyperparameters (TRL GRPOConfig names).
+num_generations: 8             # the group G — completions per prompt, mean = baseline
+learning_rate: 1.0e-6
+beta: 0.04                     # KL coefficient toward the reference model
+max_prompt_length: 512
+max_completion_length: 256
+per_device_train_batch_size: 8
+gradient_accumulation_steps: 4
+num_train_epochs: 1
+max_steps: 200                 # keep a single rented-GPU session cheap
+temperature: 0.9
+bf16: true
+logging_steps: 5
+save_steps: 100
+seed: 0
+
+# Modal GPU to rent. A0.5B model fits comfortably on one L4/A10G.
+gpu: A10G
+timeout_minutes: 60

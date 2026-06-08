@@ -1,0 +1,15 @@
+# Verified path: drives the pure-numpy GRPO loop (src/rl_studio/lib/grpo.py).
+# Task: emit a length-`seq_len` sequence of digits in [0, vocab) summing to
+# `target`. Deterministic, checkable reward — no neural reward model (RLVR-style).
+# Runs on CPU in well under a second and demonstrably learns.
+name: digit-sum
+task: digit_sum
+seq_len: 4          # 4 digit positions
+vocab: 10           # digits 0..9 -> reachable sums [0, 36]
+target: 18          # mid-range target the policy must learn to hit
+group_size: 24      # G completions per step; baseline = group mean (the GRPO trick)
+steps: 300
+lr: 0.5
+kl_coef: 0.02       # KL penalty toward the frozen reference policy
+adv_eps: 0.0001     # numerical floor on the group-std advantage normalizer
+seed: 0

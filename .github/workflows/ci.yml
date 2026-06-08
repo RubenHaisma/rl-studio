@@ -1,0 +1,25 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      # Verified path only: the light `dev` extra (no torch). The `gpu` extra
+      # and scripts/modal_grpo.py need a GPU and are intentionally not run here.
+      - run: uv sync --extra dev
+      - name: lint
+        run: uv run ruff check src tests
+      - name: format check
+        run: uv run ruff format --check src tests
+      - name: doctor (json must be valid + exit 0)
+        run: uv run rl-studio doctor --json
+      - name: tests (incl. GRPO-learns assertion)
+        run: uv run pytest
