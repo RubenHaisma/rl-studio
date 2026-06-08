@@ -16,10 +16,21 @@ jobs:
       # and scripts/modal_grpo.py need a GPU and are intentionally not run here.
       - run: uv sync --extra dev
       - name: lint
-        run: uv run ruff check src tests
+        run: uv run ruff check src tests scripts
       - name: format check
-        run: uv run ruff format --check src tests
+        run: uv run ruff format --check src tests scripts
       - name: doctor (json must be valid + exit 0)
         run: uv run rl-studio doctor --json
       - name: tests (incl. GRPO-learns assertion)
         run: uv run pytest
+
+      # ── signature touches: CI runs the (CPU) GRPO loop, proves it's
+      #    deterministic, and keeps the docs honest ──
+      - name: reproducibility (same seed → identical metrics)
+        run: uv run python scripts/check_repro.py -- uv run rl-studio train configs/toy-grpo.yaml
+      - name: README commands stay runnable
+        run: uv run python scripts/test_readme.py
+      - name: train + publish live metrics to the run summary
+        run: |
+          uv run rl-studio train configs/toy-grpo.yaml --json | tee metrics.json
+          uv run python scripts/ci_report.py metrics.json >> "$GITHUB_STEP_SUMMARY"

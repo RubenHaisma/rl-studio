@@ -1,5 +1,7 @@
 # rl-studio
 
+[![ci](https://github.com/RubenHaisma/rl-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/RubenHaisma/rl-studio/actions/workflows/ci.yml)
+
 **CLI-first GRPO reinforcement-learning fine-tuning.** A real, minimal **GRPO** (Group-Relative Policy Optimization) loop you can read, run, and verify — train → eval-against-baseline → sample, tracked in MLflow, driven by one machine-readable binary. Built in the house style of [`ml-pipeline-template`](https://github.com/rubenhaisma/ml-pipeline-template): `--json` everywhere, load-bearing exit codes, honest baselines.
 
 > GRPO is the RL method behind DeepSeek-R1-style reasoning training: drop the value network and use the **group mean** of sampled completions as the baseline. This repo implements that mechanic for real — twice. A **verified** pure-numpy loop on a verifiable-reward toy task that runs on CPU in CI in under a second and *demonstrably learns*, and a **scaffolded** LLM path (TRL `GRPOTrainer` on `Qwen2.5-0.5B` against GSM8K, rented on a Modal GPU) that is wired but honestly marked unverified.
@@ -16,6 +18,7 @@ The numpy loop in [`src/rl_studio/lib/grpo.py`](src/rl_studio/lib/grpo.py) does 
 
 ## Quickstart
 
+<!-- ci-test -->
 ```bash
 uv sync --extra dev                         # install (light: numpy, no torch)
 uv run rl-studio doctor                      # environment readiness (--json for CI)
@@ -23,6 +26,8 @@ uv run rl-studio train configs/toy-grpo.yaml # run the numpy GRPO loop
 uv run rl-studio eval digit-sum              # success rate vs random baseline
 uv run rl-studio sample digit-sum --n 5      # see what the policy emits
 ```
+
+> The block above is marked `<!-- ci-test -->` — **CI runs these exact commands on every push**, so this quickstart can never silently drift from the code.
 
 Output of `train` (human mode):
 
@@ -60,7 +65,17 @@ uv run rl-studio gpu-train configs/grpo-qwen.yaml   # prints the Modal launch co
 modal run scripts/modal_grpo.py --config configs/grpo-qwen.yaml
 ```
 
-[`scripts/modal_grpo.py`](scripts/modal_grpo.py) runs TRL's `GRPOTrainer` on `Qwen/Qwen2.5-0.5B-Instruct` against GSM8K with a verifiable correctness reward (parse the boxed answer, check it). [`configs/grpo-qwen.yaml`](configs/grpo-qwen.yaml) holds the hyperparameters. Without the `gpu` extra, `rl-studio gpu-train` fails cleanly with one line and a non-zero exit — no silent no-op.
+[`scripts/modal_grpo.py`](scripts/modal_grpo.py) runs TRL's `GRPOTrainer` on `Qwen/Qwen2.5-0.5B-Instruct` against GSM8K with a verifiable correctness reward (parse the final answer, check it). [`configs/grpo-qwen.yaml`](configs/grpo-qwen.yaml) holds the hyperparameters. Without the `gpu` extra, `rl-studio gpu-train` fails cleanly with one line and a non-zero exit — no silent no-op.
+
+### This actually ran on a GPU
+
+The LLM path isn't just wired — it was run on a Modal A10G (200 GRPO steps, ~25 min). The verifiable GSM8K answer-correctness reward rose from **0.256 → 0.475** as the policy learned to get more answers right:
+
+```
+reward over 200 steps:  ▂▄▃▃▁▃▄▂▆▂▃▂▁▃▅▂▁▄▃▃▄▄▅▄▃▂▅▃▅▃▄▄▃▁▃▂▁▃▄█   0.26 → 0.48
+```
+
+The full curve and run metadata are committed under [`results/grpo-qwen/`](results/grpo-qwen/) — noisy, as expected for a 0.5B model with small batches, but clearly trending up. (It's marked "not run in CI" below because *CI* never rents a GPU, not because it hasn't run.)
 
 ## Notebooks (marimo)
 
@@ -79,10 +94,20 @@ uv run marimo edit notebooks/02_kl.py            # KL-to-reference drift over tr
 | `pytest` smoke suite + ruff in CI                      | ✅ verified                          |
 | MLflow local sqlite store (reward/KL curves logged)    | ✅ verified                          |
 | MLflow server via docker-compose                       | 🟡 compose provided, runs locally    |
-| LLM GRPO (TRL `GRPOTrainer`, Qwen2.5-0.5B, GSM8K)      | 🟠 scaffolded, **not run in CI** (needs a GPU) |
-| Modal GPU launch (`scripts/modal_grpo.py`)             | 🟠 scaffolded, **not run in CI**     |
+| LLM GRPO (TRL `GRPOTrainer`, Qwen2.5-0.5B, GSM8K)      | ✅ **ran on a Modal A10G** — reward 0.26→0.48, curve in `results/grpo-qwen/`; not run *in CI* (no GPU) |
+| Modal GPU launch (`scripts/modal_grpo.py`)             | ✅ ran on Modal; not in CI            |
 
 The honest split: the **GRPO algorithm** is verified end-to-end on a CPU toy task; the **LLM application** of the same algorithm is wired against TRL + Modal but requires a rented GPU and an account, so it is presented as scaffolding, not a passing test.
+
+## CI does more than lint
+
+Most repos' CI checks that the code *parses*. This one checks that the GRPO loop *works* — three things beyond lint + tests, all stdlib, no extra deps:
+
+1. **It runs the loop and publishes the numbers.** Every push trains the numpy GRPO loop and posts a live metrics table (reward, success rate, lift over baseline) to the GitHub Actions [run summary](https://github.com/RubenHaisma/rl-studio/actions) (`scripts/ci_report.py`).
+2. **It keeps the docs honest.** The Quickstart block is marked `<!-- ci-test -->` and `scripts/test_readme.py` runs those exact commands in CI — drift fails the build.
+3. **It proves determinism.** `scripts/check_repro.py` trains twice and asserts identical metrics — a seed is a promise, and CI verifies it holds.
+
+Run them locally: `make summary`, `make readme`, `make repro`.
 
 ## How it relates to the template
 
