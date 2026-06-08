@@ -143,6 +143,9 @@ def train_grpo(cfg: dict) -> dict:
     os.environ.setdefault("HF_HUB_CACHE", "/vol/hf/hub")
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
+    import dataclasses
+
+    import trl
     from datasets import load_dataset
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from trl import GRPOConfig, GRPOTrainer
@@ -164,24 +167,34 @@ def train_grpo(cfg: dict) -> dict:
 
     dataset = raw.map(to_prompt)
 
-    grpo_config = GRPOConfig(
-        output_dir=MODEL_DIR,
-        num_generations=cfg["num_generations"],  # the group G
-        learning_rate=float(cfg["learning_rate"]),
-        beta=float(cfg["beta"]),  # KL coefficient toward the reference model
-        max_prompt_length=cfg["max_prompt_length"],
-        max_completion_length=cfg["max_completion_length"],
-        per_device_train_batch_size=cfg["per_device_train_batch_size"],
-        gradient_accumulation_steps=cfg["gradient_accumulation_steps"],
-        num_train_epochs=cfg["num_train_epochs"],
-        max_steps=cfg.get("max_steps", -1),
-        temperature=cfg["temperature"],
-        bf16=cfg.get("bf16", True),
-        logging_steps=cfg["logging_steps"],
-        save_steps=cfg["save_steps"],
-        seed=cfg["seed"],
-        report_to=[],  # metrics returned to the launcher + written under results/
-    )
+    # Build the desired config, then keep only keys this TRL version actually
+    # supports. GRPOConfig's surface drifts across releases (e.g. TRL 1.5 dropped
+    # max_prompt_length); filtering against the live dataclass fields means a TRL
+    # bump degrades gracefully with a logged note instead of a hard TypeError.
+    desired = {
+        "output_dir": MODEL_DIR,
+        "num_generations": cfg["num_generations"],  # the group G
+        "learning_rate": float(cfg["learning_rate"]),
+        "beta": float(cfg["beta"]),  # KL coefficient toward the reference model
+        "max_prompt_length": cfg.get("max_prompt_length"),
+        "max_completion_length": cfg["max_completion_length"],
+        "per_device_train_batch_size": cfg["per_device_train_batch_size"],
+        "gradient_accumulation_steps": cfg["gradient_accumulation_steps"],
+        "num_train_epochs": cfg["num_train_epochs"],
+        "max_steps": cfg.get("max_steps", -1),
+        "temperature": cfg["temperature"],
+        "bf16": cfg.get("bf16", True),
+        "logging_steps": cfg["logging_steps"],
+        "save_steps": cfg["save_steps"],
+        "seed": cfg["seed"],
+        "report_to": [],  # metrics returned to the launcher + written under results/
+    }
+    valid = {f.name for f in dataclasses.fields(GRPOConfig)}
+    kwargs = {k: v for k, v in desired.items() if k in valid and v is not None}
+    dropped = sorted(set(desired) - set(kwargs))
+    if dropped:
+        print(f"note: GRPOConfig in TRL {trl.__version__} does not support {dropped} — skipping")
+    grpo_config = GRPOConfig(**kwargs)
 
     trainer = GRPOTrainer(
         model=model,
