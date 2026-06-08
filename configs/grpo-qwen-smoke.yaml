@@ -1,0 +1,28 @@
+# Tiny smoke run: prove the LLM GRPO path works end-to-end on a rented GPU for
+# cents (~$0.10, a few minutes) before committing to the full run. Same model,
+# minimal steps. The Laava Studio "tiny smoke" pattern.
+#   uv run modal run scripts/modal_grpo.py --config configs/grpo-qwen-smoke.yaml
+name: grpo-qwen-smoke
+
+model: Qwen/Qwen2.5-0.5B-Instruct
+dataset: openai/gsm8k
+dataset_config: main
+split: train
+
+num_generations: 4             # the group G (small, for speed)
+learning_rate: 1.0e-6
+beta: 0.04                     # KL coefficient toward the reference model
+max_prompt_length: 256
+max_completion_length: 128
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 1
+num_train_epochs: 1
+max_steps: 5                   # smoke: just prove the loop runs + reward logs
+temperature: 0.9
+bf16: true
+logging_steps: 1
+save_steps: 5
+seed: 0
+
+gpu: A10G
+timeout_minutes: 20

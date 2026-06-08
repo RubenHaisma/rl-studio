@@ -3281,10 +3281,12 @@ dev = [
 gpu = [
     { name = "accelerate" },
     { name = "datasets" },
-    { name = "modal" },
     { name = "torch" },
     { name = "transformers" },
     { name = "trl" },
+]
+modal = [
+    { name = "modal" },
 ]
 
 [package.metadata]
@@ -3293,7 +3295,7 @@ requires-dist = [
     { name = "datasets", marker = "extra == 'gpu'", specifier = ">=2.20" },
     { name = "marimo", marker = "extra == 'dev'", specifier = ">=0.8" },
     { name = "mlflow", specifier = ">=2.14" },
-    { name = "modal", marker = "extra == 'gpu'", specifier = ">=0.64" },
+    { name = "modal", marker = "extra == 'modal'", specifier = ">=0.64" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -3304,7 +3306,7 @@ requires-dist = [
     { name = "trl", marker = "extra == 'gpu'", specifier = ">=0.10" },
     { name = "typer", specifier = ">=0.12" },
 ]
-provides-extras = ["dev", "gpu"]
+provides-extras = ["dev", "modal", "gpu"]
 
 [[package]]
 name = "ruff"

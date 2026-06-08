@@ -20,15 +20,19 @@ dev = [
     "ruff>=0.5",
     "marimo>=0.8",
 ]
-# Heavy LLM stack for the scaffolded GPU path only. Kept out of the verified
-# path and CI on purpose: `uv sync --extra dev` stays light and fast.
+# Launch Modal GPU jobs from your laptop. This is ALL you need locally — the
+# heavy training stack is baked into the Modal container image (see scripts/),
+# never installed here. `uv sync --extra modal` stays small and fast.
+modal = ["modal>=0.64"]
+# Full LLM training stack — only for running GRPO on your OWN local GPU without
+# Modal. On Modal this is built into the container image instead, so you do not
+# need this extra to launch a rented-GPU run. Kept out of CI on purpose.
 gpu = [
     "torch>=2.3",
     "transformers>=4.44",
     "trl>=0.10",
     "datasets>=2.20",
     "accelerate>=0.33",
-    "modal>=0.64",
 ]
 
 [project.scripts]
