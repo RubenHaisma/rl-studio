@@ -22,21 +22,37 @@ The numpy loop in [`src/rl_studio/lib/grpo.py`](src/rl_studio/lib/grpo.py) does 
 
 ## Backends
 
-One agent-facing command, several engines behind it. The config picks the engine; the result shape is identical, so an agent never special-cases the backend.
+One agent-facing command, several engines behind it. The config picks the engine **and compute target**; the result shape is identical, so an agent never special-cases it.
 
-| backend | engine | runs on | status |
-| --- | --- | --- | --- |
-| `builtin` | pure-numpy GRPO loop (this repo) | CPU, in-process | ✅ CI-verified, learns |
-| `trl` | TRL `GRPOTrainer` (Qwen2.5-0.5B / GSM8K) | rented Modal GPU | ✅ ran for real (reward 0.26→0.48) |
-| `verl`, `unsloth` | — | — | 🧭 roadmap (same seam) |
+| backend | compute | engine | runs on | status |
+| --- | --- | --- | --- | --- |
+| `builtin` | — | pure-numpy GRPO loop | CPU, in-process | ✅ CI-verified, learns |
+| `trl` | `modal` | TRL `GRPOTrainer` | rented Modal GPU | ✅ ran for real (reward 0.26→0.48) |
+| `trl` | `local` | TRL `GRPOTrainer` | your own GPU, in-process | ✅ same engine; routing CI-tested |
+| `verl`, `unsloth` | — | — | — | 🧭 roadmap (same seam) |
 
 ```bash
-rl-studio train configs/toy-grpo.yaml          # backend: builtin  → numpy, here, now
-rl-studio train configs/grpo-qwen.yaml --dry-run  # backend: trl → prints the dispatch plan, no spend
-rl-studio train configs/grpo-qwen.yaml         # backend: trl → real GRPO on a Modal GPU
+rl-studio train configs/toy-grpo.yaml             # builtin → numpy, here, now
+rl-studio train configs/grpo-qwen.yaml --dry-run  # trl/modal → plan only, no spend
+rl-studio train configs/grpo-qwen.yaml            # trl/modal → real GRPO on a rented GPU
+rl-studio train configs/grpo-local.yaml           # trl/local → real GRPO on your own GPU
 ```
 
-`--dry-run` lets an agent inspect exactly what would run before spending a cent; `--backend` overrides the config.
+### Pluggable — point it at any task (no code edits)
+
+The `trl` backend is fully config-driven:
+
+```yaml
+model: Qwen/Qwen2.5-0.5B-Instruct   # any HF causal LM
+dataset: openai/gsm8k               # any HF dataset
+prompt_column: question             # which column is the prompt
+answer_column: answer               # which column is the gold answer
+reward: numeric_match               # built-in: numeric_match | exact_match | contains | regex_match
+# reward_fn: rewards/example_reward.py:reward   # ...or your own verifiable reward
+compute: modal                      # modal (rented) | local (your GPU)
+```
+
+Built-in rewards cover the verifiable-reward 80% (math / answer-matching / format); `reward_fn` is the escape hatch for anything else — a deterministic, checkable function, no reward model. `--dry-run` shows the resolved model/dataset/reward/compute before you spend; `--backend` overrides the config.
 
 ## Quickstart
 
@@ -64,10 +80,11 @@ Everything is also available via `make`: `make demo` runs the full train → eva
 
 ### Spin up your own RL pipeline in minutes
 
-This is a working template, not a demo to read. To train GRPO on *your* task:
+A working template, not a demo to read — and mostly **config, not code**:
 
-- **Own verifiable reward (CPU):** edit `reward(...)` in [`src/rl_studio/lib/grpo.py`](src/rl_studio/lib/grpo.py), tweak `configs/toy-grpo.yaml`, run `rl-studio train`. The group-relative advantage, KL penalty, baseline reporting, and MLflow logging are already wired — you only write the reward.
-- **Real LLM on a GPU:** `uv sync --extra modal`, `modal token set` once, edit `correctness_reward(...)` + `configs/grpo-qwen.yaml`, then `modal run scripts/modal_grpo.py`. No training infra to manage; the reward curve lands in `results/`.
+- **Your task, no code:** copy `configs/grpo-qwen.yaml`, point `model` / `dataset` / `prompt_column` / `answer_column` / `reward` at your task, choose `compute: modal` (rented GPU) or `local` (your own), then `rl-studio train configs/<yours>.yaml`. Dataset mapping, GRPO config, reward registry, and MLflow logging are already wired.
+- **A custom reward:** drop a function in `rewards/<yours>.py` and set `reward_fn: rewards/<yours>.py:reward` — see [`rewards/example_reward.py`](rewards/example_reward.py). Verifiable only (deterministic, checkable; no reward model).
+- **Learn the mechanic (CPU):** the `builtin` backend (`configs/toy-grpo.yaml`) is a real GRPO loop in numpy you can read end to end.
 
 Full adapt-it guide for humans and agents: [`AGENTS.md`](AGENTS.md).
 
@@ -111,9 +128,9 @@ Every command emits a single JSON object with `--json` and returns a load-bearin
 
 Tracking UI (optional): `make up` starts MLflow on `localhost:5050`, then `export MLFLOW_TRACKING_URI=http://localhost:5050`.
 
-## The GPU path (scaffolded, off-box)
+## Running on real GPUs (Modal or local)
 
-The verified path runs on CPU. The real LLM training is rented on a GPU and is *not* run in CI:
+The `builtin` backend runs on CPU; the `trl` backend runs real GRPO on a GPU — rented (`compute: modal`) or your own (`compute: local`). `rl-studio train` is the entry, but the lower-level paths are available too:
 
 ```bash
 uv sync --extra gpu                       # torch / transformers / trl / datasets / modal
@@ -152,6 +169,8 @@ uv run marimo edit notebooks/02_kl.py            # KL-to-reference drift over tr
 | MLflow server via docker-compose                       | 🟡 compose provided, runs locally    |
 | LLM GRPO (TRL `GRPOTrainer`, Qwen2.5-0.5B, GSM8K)      | ✅ **ran on a Modal A10G** — reward 0.26→0.48, curve in `results/grpo-qwen/`; not run *in CI* (no GPU) |
 | unified `train` → `trl` dispatch (one command → GPU engine) | ✅ ran end-to-end (smoke + full); routing + clean-fail are CI-tested |
+| pluggable model / dataset / reward (registry + `reward_fn`) | ✅ reward registry + custom loader unit-tested; carried through dispatch |
+| `compute: local` (same engine, your own GPU)           | 🟡 wired — same `run_grpo` Modal runs; routing + clean-fail CI-tested; not run here (no local CUDA) |
 | Modal GPU launch (`scripts/modal_grpo.py`)             | ✅ ran on Modal; not in CI            |
 
 The honest split: the **GRPO algorithm** is verified end-to-end on a CPU toy task; the **LLM application** of the same algorithm is wired against TRL + Modal but requires a rented GPU and an account, so it is presented as scaffolding, not a passing test.

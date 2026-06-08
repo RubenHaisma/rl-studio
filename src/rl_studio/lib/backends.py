@@ -35,9 +35,11 @@ TRL = "trl"
 ROADMAP = {"verl", "unsloth"}  # named so the seam is honest; not implemented
 
 MODAL_SCRIPT = "scripts/modal_grpo.py"
-# What the LAUNCHER needs locally. torch/trl/transformers build in the Modal
-# container image, never on the user's machine — so launching only needs modal.
-TRL_LAUNCH_DEPS = ["modal"]
+# compute=modal only needs the `modal` launcher locally (torch/trl build in the
+# container). compute=local runs the engine in-process, so it needs the `gpu`
+# extra (torch/trl/transformers/datasets) on a real CUDA/MPS device.
+MODAL_LAUNCH_DEPS = ["modal"]
+LOCAL_GPU_DEPS = ["torch", "trl", "transformers", "datasets"]
 
 
 def _read_yaml(config_path: str | Path) -> dict[str, Any]:
@@ -58,46 +60,9 @@ def read_backend(config_path: str | Path, override: str | None = None) -> str:
     return _read_yaml(config_path).get("backend", BUILTIN)
 
 
-def run_trl(config_path: str, *, dry_run: bool) -> dict[str, Any]:
-    """Dispatch a real GRPO run to TRL on a Modal GPU and normalize its result.
-
-    With ``dry_run`` it returns the dispatch plan without spending anything — so
-    an agent (or CI) can inspect exactly what would run. Without it, it launches
-    the Modal job, then reads back ``results/<name>/modal_result.json``.
-    """
-    name = _read_yaml(config_path).get("name", "grpo")
-    command = ["modal", "run", MODAL_SCRIPT, "--config", config_path]
-    plan = {
-        "ok": True,
-        "backend": TRL,
-        "name": name,
-        "dispatch": "modal",
-        "engine": "trl.GRPOTrainer",
-        "would_run": " ".join(command),
-        "note": "real GRPO on a rented Modal GPU — spends credits, takes minutes",
-    }
-    if dry_run:
-        return plan
-
-    missing = [m for m in TRL_LAUNCH_DEPS if importlib.util.find_spec(m) is None]
-    if missing:
-        raise CliError(
-            f"trl backend needs the 'modal' launcher (missing: {', '.join(missing)}); "
-            "install with: uv sync --extra modal  — or pass --dry-run to see the plan",
-            code=2,
-        )
-
-    # Stream the engine's output to stderr so our stdout stays a clean JSON channel.
-    proc = subprocess.run(command, stdout=sys.stderr, stderr=sys.stderr)  # noqa: S603
-    if proc.returncode != 0:
-        raise CliError(
-            f"trl backend run failed (modal exit {proc.returncode})", code=proc.returncode
-        )
-
-    result_path = Path("results") / name / "modal_result.json"
-    if not result_path.is_file():
-        raise CliError(f"trl run finished but no result at {result_path}")
-    raw = json.loads(result_path.read_text())
+def _normalize(raw: dict, *, name: str, compute: str, results_path: str) -> dict[str, Any]:
+    """Shape a raw engine result into the stable contract both compute targets
+    (and the builtin backend) return."""
     history = raw.get("history") or []
 
     def _last(key: str) -> Any:
@@ -114,11 +79,92 @@ def run_trl(config_path: str, *, dry_run: bool) -> dict[str, Any]:
         "ok": bool(raw.get("ok", True)),
         "backend": TRL,
         "name": name,
+        "compute": compute,
         "model": raw.get("model"),
         "metrics": {
             "final_reward": final_reward if final_reward is not None else _last("reward"),
             "final_loss": final_loss if final_loss is not None else _last("loss"),
             "steps": raw.get("steps"),
         },
-        "results_path": str(result_path),
+        "results_path": results_path,
     }
+
+
+def run_trl(config_path: str, *, dry_run: bool) -> dict[str, Any]:
+    """Dispatch a real GRPO run to the configured compute target and normalize it.
+
+    Same engine (``rl_studio.lib.trl_runner``) either way:
+
+    - ``compute: modal`` — launch it in a rented Modal container (subprocess).
+    - ``compute: local`` — run it in-process on this machine's GPU.
+
+    ``dry_run`` returns the dispatch plan without spending anything — so an agent
+    (or CI) can inspect model / dataset / reward / compute and cost first.
+    """
+    cfg = _read_yaml(config_path)
+    name = cfg.get("name", "grpo")
+    compute = cfg.get("compute", "modal")
+    reward = cfg.get("reward_fn") or cfg.get("reward", "numeric_match")
+
+    plan = {
+        "ok": True,
+        "backend": TRL,
+        "name": name,
+        "compute": compute,
+        "engine": "trl.GRPOTrainer",
+        "model": cfg.get("model"),
+        "dataset": cfg.get("dataset"),
+        "reward": reward,
+    }
+    command = ["modal", "run", MODAL_SCRIPT, "--config", config_path]
+    if compute == "modal":
+        plan["dispatch"] = "modal"
+        plan["would_run"] = " ".join(command)
+        plan["note"] = "real GRPO on a rented Modal GPU — spends credits, takes minutes"
+    elif compute == "local":
+        plan["dispatch"] = "in-process"
+        plan["would_run"] = f"trl_runner.run_grpo on your local GPU ({cfg.get('model')})"
+        plan["note"] = "real GRPO on your local GPU — needs the gpu extra + a CUDA/MPS device"
+    else:
+        raise CliError(f"unknown compute '{compute}' (known: modal, local)")
+
+    if dry_run:
+        return plan
+
+    if compute == "modal":
+        missing = [m for m in MODAL_LAUNCH_DEPS if importlib.util.find_spec(m) is None]
+        if missing:
+            raise CliError(
+                f"compute=modal needs the 'modal' launcher (missing: {', '.join(missing)}); "
+                "install with: uv sync --extra modal  — or pass --dry-run to see the plan",
+                code=2,
+            )
+        # Stream the engine's output to stderr so our stdout stays a clean JSON channel.
+        proc = subprocess.run(command, stdout=sys.stderr, stderr=sys.stderr)  # noqa: S603
+        if proc.returncode != 0:
+            raise CliError(
+                f"trl backend run failed (modal exit {proc.returncode})", code=proc.returncode
+            )
+        result_path = Path("results") / name / "modal_result.json"
+        if not result_path.is_file():
+            raise CliError(f"trl run finished but no result at {result_path}")
+        raw = json.loads(result_path.read_text())
+        return _normalize(raw, name=name, compute="modal", results_path=str(result_path))
+
+    # compute == "local": run the same engine in-process on this machine's GPU.
+    missing = [m for m in LOCAL_GPU_DEPS if importlib.util.find_spec(m) is None]
+    if missing:
+        raise CliError(
+            f"compute=local needs the 'gpu' extra (missing: {', '.join(missing)}); "
+            "install with: uv sync --extra gpu  — or pass --dry-run to see the plan",
+            code=2,
+        )
+    from rl_studio.lib import trl_runner
+
+    out_dir = str(Path("artifacts") / name)
+    raw = trl_runner.run_grpo(cfg, output_dir=out_dir)
+    results_dir = Path("results") / name
+    results_dir.mkdir(parents=True, exist_ok=True)
+    result_file = results_dir / "local_result.json"
+    result_file.write_text(json.dumps(raw, indent=2, default=str))
+    return _normalize(raw, name=name, compute="local", results_path=str(result_file))

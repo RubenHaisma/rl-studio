@@ -1,0 +1,31 @@
+# Same engine, your own GPU. `rl-studio train configs/grpo-local.yaml` runs TRL's
+# GRPOTrainer in-process (no Modal). Needs the gpu extra on a CUDA/MPS device:
+#   uv sync --extra gpu
+#   rl-studio train configs/grpo-local.yaml --dry-run   # inspect the plan first
+#   rl-studio train configs/grpo-local.yaml --json      # train locally
+name: grpo-local
+backend: trl
+compute: local      # in-process on this machine's GPU
+
+model: Qwen/Qwen2.5-0.5B-Instruct
+dataset: openai/gsm8k
+dataset_config: main
+split: train
+prompt_column: question
+answer_column: answer
+reward: numeric_match        # or reward_fn: rewards/example_reward.py:reward
+
+# GRPO hyperparameters (TRL GRPOConfig names) — sized for a single GPU.
+num_generations: 4
+learning_rate: 1.0e-6
+beta: 0.04
+max_completion_length: 256
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 1
+num_train_epochs: 1
+max_steps: 50
+temperature: 0.9
+bf16: true
+logging_steps: 1
+save_steps: 50
+seed: 0

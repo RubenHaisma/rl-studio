@@ -3,12 +3,18 @@
 # verified one; this is the same algorithm applied to a real language model
 # against a verifiable-reward task (GSM8K answer-correctness).
 name: grpo-qwen
-backend: trl        # real GRPO via TRL's GRPOTrainer on a Modal GPU
+backend: trl        # real GRPO via TRL's GRPOTrainer
+compute: modal      # modal (rented GPU) | local (your own GPU) — same engine
 
+# Pluggable: point model/dataset/reward at anything; no code edits needed.
 model: Qwen/Qwen2.5-0.5B-Instruct
-dataset: openai/gsm8k          # verifiable reward: parse final answer, check it
+dataset: openai/gsm8k
 dataset_config: main
 split: train
+prompt_column: question     # the prompt/question column in the dataset
+answer_column: answer       # the gold column (normalized to `answer` for rewards)
+reward: numeric_match       # built-in: numeric_match|exact_match|contains|regex_match
+# reward_fn: rewards/example_reward.py:reward   # ...or your own (overrides `reward`)
 
 # GRPO hyperparameters (TRL GRPOConfig names).
 num_generations: 8             # the group G — completions per prompt, mean = baseline

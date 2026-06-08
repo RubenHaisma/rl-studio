@@ -7,9 +7,9 @@ Agent instructions for **rl-studio**, in the cross-tool [AGENTS.md](https://agen
 An **agent-operable harness for GRPO fine-tuning**. It does not reimplement RL — it makes a real engine drivable by a coding agent through one `--json` CLI. `rl-studio train <config>` routes by the config's `backend`:
 
 1. **`builtin`** (numpy, CPU, CI-verified): `src/rl_studio/lib/grpo.py` — a real, readable GRPO loop on a verifiable-reward toy task that demonstrably learns.
-2. **`trl`** (real LLM, GPU): dispatches `scripts/modal_grpo.py` — TRL `GRPOTrainer` on Qwen2.5-0.5B / GSM8K on a rented Modal GPU (ran for real, reward 0.26→0.48). Returns the **same JSON shape** as builtin.
+2. **`trl`** (real LLM): TRL `GRPOTrainer` via the shared engine `src/rl_studio/lib/trl_runner.py`. **Pluggable** — `model` / `dataset` / `reward` are config-driven (point it at anything). Two compute targets, same engine: `compute: modal` (rented GPU, ran for real, reward 0.26→0.48) and `compute: local` (your own GPU, in-process). Same JSON shape as builtin.
 
-Roadmap backends (same seam): `verl`, `unsloth`. The dispatch layer is `src/rl_studio/lib/backends.py`.
+Roadmap backends (same seam): `verl`, `unsloth`. Dispatch layer: `src/rl_studio/lib/backends.py`.
 
 ## Driving the CLI as an agent
 
@@ -38,19 +38,18 @@ rl-studio sample digit-sum --n 5 --json
 
 ## Set up your own RL pipeline (fast)
 
-This repo is a working template — point it at *your* task, keep the loop.
+Mostly **config, not code**. `rl-studio train <config>` is the one entry; the config picks engine, compute, model, dataset, and reward.
 
-**A new verifiable-reward task (CPU, minutes):**
-1. Edit `reward(seq, target)` and `is_success(...)` in `src/rl_studio/lib/grpo.py` — return a higher scalar for better outputs (deterministic, checkable; no reward model).
-2. Adjust the action space (`seq_len`, `vocab`) and hyperparameters in `configs/toy-grpo.yaml`.
-3. `rl-studio train configs/<your>.yaml --json` — the group-relative advantage, KL penalty, and MLflow logging are already wired.
+**A real LLM on your task (no code for common cases):**
+1. Copy `configs/grpo-qwen.yaml`. Set `model`, `dataset` (+ `dataset_config` / `split`), `prompt_column`, `answer_column`, and `reward` (built-in: `numeric_match` | `exact_match` | `contains` | `regex_match`; `regex_match` also reads `reward_pattern`).
+2. Pick compute: `compute: modal` (rented GPU — `uv sync --extra modal`, `modal token set` once) or `compute: local` (your own GPU — `uv sync --extra gpu`).
+3. `rl-studio train configs/<yours>.yaml --dry-run --json` to inspect the plan + cost, then drop `--dry-run` to run. Results land in `results/<name>/`.
 
-**A real LLM (GPU via Modal, no infra to manage):**
-1. `uv sync --extra modal` (just the launcher — torch builds in the container, not on your laptop). Auth is machine-level: `modal token set` once.
-2. Edit `correctness_reward(...)` in `scripts/modal_grpo.py` for your verifiable reward, and the model/dataset/hparams in `configs/grpo-qwen.yaml`.
-3. Smoke cheap first, then run: `modal run scripts/modal_grpo.py --config configs/grpo-qwen-smoke.yaml` then `--config configs/grpo-qwen.yaml`. The reward curve lands in `results/<name>/`.
+**A custom reward (escape hatch):** write a verifiable function in `rewards/<yours>.py` — signature `(completions, answer, **kw) -> list[float]`, deterministic/checkable, no reward model — and set `reward_fn: rewards/<yours>.py:reward`. See `rewards/example_reward.py`.
 
-`GRPOConfig` kwargs are filtered to the installed TRL's fields, so a TRL version bump degrades gracefully instead of crashing.
+**Learn / CI / offline:** the `builtin` backend (`configs/toy-grpo.yaml`) is a real numpy GRPO loop; edit `reward(...)` in `src/rl_studio/lib/grpo.py` for a CPU toy task.
+
+The shared engine is `src/rl_studio/lib/trl_runner.py` (local + Modal run identical code). `GRPOConfig` kwargs are filtered to the installed TRL's fields, so a version bump degrades gracefully.
 
 ## Setup (for the agent's environment)
 

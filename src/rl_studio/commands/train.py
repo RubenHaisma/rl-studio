@@ -49,14 +49,17 @@ def train(
 def _emit_trl(result: dict, *, json_out: bool, dry_run: bool) -> None:
     if dry_run:
         human = (
-            f"[green]plan[/green] trl backend → {result['dispatch']} ({result['engine']})\n"
+            f"[green]plan[/green] trl · compute={result['compute']} → {result['dispatch']}\n"
+            f"  engine {result['engine']} · model {result.get('model')}\n"
+            f"  dataset {result.get('dataset')} · reward {result.get('reward')}\n"
             f"  would run: {result['would_run']}\n"
             f"  {result['note']}"
         )
     else:
         m = result["metrics"]
         human = (
-            f"[green]trained[/green] {result['name']} via TRL on a GPU ({result.get('model')})\n"
+            f"[green]trained[/green] {result['name']} via TRL "
+            f"({result.get('compute')}, {result.get('model')})\n"
             f"  final reward {m['final_reward']} over {m['steps']} steps\n"
             f"  results -> {result['results_path']}"
         )

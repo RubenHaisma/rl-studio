@@ -17,7 +17,7 @@ import pytest
 from typer.testing import CliRunner
 
 from rl_studio.cli import app
-from rl_studio.lib import backends, grpo
+from rl_studio.lib import backends, grpo, trl_runner
 from rl_studio.lib.config import GRPOConfig
 from rl_studio.output import CliError
 
@@ -168,3 +168,60 @@ def test_trl_backend_requires_launcher(monkeypatch):
     monkeypatch.setattr(backends.importlib.util, "find_spec", lambda name: None)
     with pytest.raises(CliError):
         backends.run_trl("configs/grpo-qwen.yaml", dry_run=False)
+
+
+# ---------------------------------------------------------------------------
+# pluggable trl backend: reward registry, custom reward, compute targets
+# ---------------------------------------------------------------------------
+def test_reward_registry_numeric_match():
+    comps = [
+        [{"role": "assistant", "content": "let me think ... the answer is 42"}],
+        [{"role": "assistant", "content": "7"}],
+    ]
+    assert trl_runner.numeric_match(comps, ["#### 42", "#### 9"]) == [1.0, 0.0]
+
+
+def test_reward_registry_exact_and_contains():
+    assert trl_runner.exact_match(["hello"], ["hello"]) == [1.0]
+    assert trl_runner.contains(["the cat sat"], ["cat"]) == [1.0]
+    assert trl_runner.contains(["dog"], ["cat"]) == [0.0]
+
+
+def test_load_reward_builtin_and_unknown():
+    assert trl_runner.load_reward({"reward": "exact_match"}) is trl_runner.exact_match
+    with pytest.raises(KeyError):
+        trl_runner.load_reward({"reward": "nope"})
+
+
+def test_load_reward_custom_file():
+    fn = trl_runner.load_reward({"reward_fn": "rewards/example_reward.py:reward"})
+    scores = fn([[{"role": "assistant", "content": "work it out: the answer is 42"}]], ["#### 42"])
+    assert scores[0] >= 1.0  # correct + reasoning bonus
+
+
+def test_train_trl_local_dry_run():
+    result = runner.invoke(app, ["train", "configs/grpo-local.yaml", "--dry-run", "--json"])
+    assert result.exit_code == 0, result.stdout
+    p = json.loads(result.stdout)
+    assert p["backend"] == "trl" and p["compute"] == "local" and p["dispatch"] == "in-process"
+
+
+def test_train_trl_modal_dry_run_has_pluggable_fields():
+    result = runner.invoke(app, ["train", "configs/grpo-qwen.yaml", "--dry-run", "--json"])
+    p = json.loads(result.stdout)
+    assert p["compute"] == "modal"
+    assert p["model"] and p["dataset"] and p["reward"]  # the pluggable knobs surface in the plan
+
+
+def test_compute_local_requires_gpu_extra(monkeypatch):
+    # compute=local without torch/trl must fail cleanly, never half-run.
+    monkeypatch.setattr(backends.importlib.util, "find_spec", lambda name: None)
+    with pytest.raises(CliError):
+        backends.run_trl("configs/grpo-local.yaml", dry_run=False)
+
+
+def test_unknown_compute_rejected(tmp_path):
+    cfg = tmp_path / "x.yaml"
+    cfg.write_text("name: x\nbackend: trl\ncompute: martian\nmodel: m\ndataset: d\n")
+    with pytest.raises(CliError):
+        backends.run_trl(str(cfg), dry_run=True)
